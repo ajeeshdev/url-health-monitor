@@ -24,10 +24,16 @@ import requests
 URLS_FILE = "urls.txt"
 TIMEOUT_SECONDS = 15
 HEADERS = {
+    # A browser-like UA cuts down on false "403 Forbidden" results from
+    # bot-protection systems (Cloudflare etc.) that block generic/bot UAs.
+    # It won't help with WAFs that block on IP range alone (GitHub Actions
+    # runners use known datacenter IPs) — see the 403 message below.
     "User-Agent": (
-        "Mozilla/5.0 (compatible; URL-Health-Monitor/1.0; "
-        "+https://github.com/)"
-    )
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
 }
 
 # Below this many characters of visible (tag-stripped) text, a 200 OK page
@@ -132,6 +138,12 @@ def check_url(url):
             return "404 Not Found"
         if resp.status_code >= 500:
             return f"Server error ({resp.status_code})"
+        if resp.status_code == 403:
+            return (
+                "403 Forbidden (often a false alarm: bot/WAF protection "
+                "blocking the automated check itself, not a real outage — "
+                "verify in a browser before assuming the site is down)"
+            )
         if resp.status_code >= 400:
             return f"Client error ({resp.status_code})"
         return inspect_page_content(url, resp)
