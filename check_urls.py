@@ -99,7 +99,9 @@ def inspect_page_content(url, resp):
             return f"Broken page detected (found: \"{signature}\")"
 
     for keyword in HACK_INDICATOR_KEYWORDS:
-        if keyword in lower_text:
+        # Word-boundary match: a plain substring check would flag "cialis"
+        # inside ordinary words like "specialist" or "commercialise".
+        if re.search(rf"\b{re.escape(keyword)}\b", lower_text):
             return f"Possible hack/spam injection detected (found: \"{keyword}\")"
 
     return None
@@ -107,11 +109,16 @@ def inspect_page_content(url, resp):
 
 def load_urls(path):
     urls = []
+    seen = set()
     with open(path, "r") as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):
-                urls.append(line)
+                if not re.match(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", line):
+                    line = f"https://{line}"
+                if line not in seen:
+                    seen.add(line)
+                    urls.append(line)
     return urls
 
 
