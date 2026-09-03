@@ -1,5 +1,6 @@
 name: Daily URL Health Check
 
+# (workflow re-saved to prompt GitHub Actions to pick it up)
 on:
   schedule:
     # Runs at 03:00 UTC every day. GitHub Actions cron is always UTC,
