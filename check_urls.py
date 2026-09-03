@@ -12,10 +12,12 @@ Config via environment variables (set as GitHub Actions secrets):
 """
 
 import os
+import re
 import smtplib
 import sys
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
+from urllib.parse import urlparse
 
 import requests
 
@@ -27,6 +29,80 @@ HEADERS = {
         "+https://github.com/)"
     )
 }
+
+# Below this many characters of visible (tag-stripped) text, a 200 OK page
+# is treated as blank rather than healthy.
+MIN_VISIBLE_TEXT_CHARS = 30
+
+# Phrases that show up on pages a server still answers with 200 OK for, but
+# that are actually broken: CMS fatal errors, hosting-suspension parking
+# pages, exposed directory listings, expired-domain placeholders, etc.
+BROKEN_PAGE_SIGNATURES = [
+    "fatal error",
+    "there has been a critical error",
+    "database connection error",
+    "error establishing a database connection",
+    "parse error: syntax error",
+    "notice: undefined variable",
+    "warning: mysql",
+    "index of /",
+    "account suspended",
+    "this account has been suspended",
+    "domain has expired",
+    "this domain is not configured",
+    "website coming soon",
+    "default web page",
+]
+
+# Terms commonly injected by site defacements / SEO spam hacks. Kept short
+# and specific to avoid flagging legitimate pages that just mention them once.
+HACK_INDICATOR_KEYWORDS = [
+    "hacked by",
+    "this site has been hacked",
+    "cialis",
+    "viagra",
+    "sildenafil",
+    "judi slot",
+    "situs slot",
+    "bandar togel",
+]
+
+
+def same_site(host_a, host_b):
+    """Rough check: do two hostnames share their last two labels?
+
+    Not a full public-suffix-list lookup, just enough to tell "our own
+    domain redirecting www -> apex" apart from "redirected to a totally
+    different domain", which is the interesting signal here.
+    """
+    if not host_a or not host_b:
+        return host_a == host_b
+    return host_a.split(".")[-2:] == host_b.split(".")[-2:]
+
+
+def inspect_page_content(url, resp):
+    """Returns None if the page content looks fine, otherwise a problem
+    description. Only meaningful for successful (2xx/3xx) responses."""
+    final_host = urlparse(resp.url).hostname
+    original_host = urlparse(url).hostname
+    if not same_site(original_host, final_host):
+        return f"Unexpected redirect to a different domain ({resp.url})"
+
+    text = resp.text[:500_000]
+    visible_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
+    if len(visible_text) < MIN_VISIBLE_TEXT_CHARS:
+        return f"Blank or near-empty page ({len(visible_text)} chars of visible text)"
+
+    lower_text = text.lower()
+    for signature in BROKEN_PAGE_SIGNATURES:
+        if signature in lower_text:
+            return f"Broken page detected (found: \"{signature}\")"
+
+    for keyword in HACK_INDICATOR_KEYWORDS:
+        if keyword in lower_text:
+            return f"Possible hack/spam injection detected (found: \"{keyword}\")"
+
+    return None
 
 
 def load_urls(path):
@@ -51,7 +127,7 @@ def check_url(url):
             return f"Server error ({resp.status_code})"
         if resp.status_code >= 400:
             return f"Client error ({resp.status_code})"
-        return None
+        return inspect_page_content(url, resp)
     except requests.exceptions.Timeout:
         return "Timed out (no response)"
     except requests.exceptions.ConnectionError:

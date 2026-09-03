@@ -1,7 +1,10 @@
 # URL Health Monitor
 
 Checks a list of websites every morning and emails you if any of them
-return a 404, a server error (5xx), or fail to respond at all.
+return a 404, a server error (5xx), fail to respond at all, come back
+blank/near-empty, show a broken-page error (e.g. a CMS fatal error or a
+"domain expired" placeholder), redirect somewhere unexpected, or contain
+signs of a hack/spam injection.
 
 ## Setup (one-time, ~5 minutes)
 
@@ -47,3 +50,9 @@ You don't have to wait for tomorrow morning:
 - Each run times out after 15 seconds per URL — slow sites aren't
   necessarily broken, just adjust `TIMEOUT_SECONDS` in `check_urls.py` if needed.
 - To add/remove monitored sites, just edit `urls.txt` — no code changes needed.
+- The blank-page/broken-page/hack-injection checks are lightweight keyword
+  heuristics (see `BROKEN_PAGE_SIGNATURES` and `HACK_INDICATOR_KEYWORDS` in
+  `check_urls.py`), not a real malware scanner — they catch obvious cases
+  (defacement, CMS fatal errors, suspended/expired hosting placeholders,
+  near-empty pages) but can miss more sophisticated compromises or, rarely,
+  flag a legitimate page. Adjust the keyword lists if you get false positives.
