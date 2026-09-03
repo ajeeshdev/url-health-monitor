@@ -29,5 +29,5 @@ jobs:
           GMAIL_USER: ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-          ALWAYS_NOTIFY: "false"
+          ALWAYS_NOTIFY: "true"
         run: python check_urls.py
