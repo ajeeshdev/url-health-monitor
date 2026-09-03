@@ -1,0 +1,122 @@
+#!/usr/bin/env python3
+"""
+Checks a list of URLs and emails a report if any return 404, 5xx,
+or fail to connect (timeout, DNS error, connection refused, etc).
+
+Config via environment variables (set as GitHub Actions secrets):
+    GMAIL_USER          - the Gmail address to send FROM
+    GMAIL_APP_PASSWORD  - a Gmail App Password (not your normal password)
+    MAIL_TO             - comma-separated recipient address(es)
+    ALWAYS_NOTIFY       - optional, "true" to get an email every run even
+                          when everything is healthy (default: "false")
+"""
+
+import os
+import smtplib
+import sys
+from datetime import datetime, timezone
+from email.mime.text import MIMEText
+
+import requests
+
+URLS_FILE = "urls.txt"
+TIMEOUT_SECONDS = 15
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (compatible; URL-Health-Monitor/1.0; "
+        "+https://github.com/)"
+    )
+}
+
+
+def load_urls(path):
+    urls = []
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                urls.append(line)
+    return urls
+
+
+def check_url(url):
+    """Returns None if healthy, otherwise a short problem description."""
+    try:
+        resp = requests.get(
+            url, timeout=TIMEOUT_SECONDS, allow_redirects=True, headers=HEADERS
+        )
+        if resp.status_code == 404:
+            return "404 Not Found"
+        if resp.status_code >= 500:
+            return f"Server error ({resp.status_code})"
+        if resp.status_code >= 400:
+            return f"Client error ({resp.status_code})"
+        return None
+    except requests.exceptions.Timeout:
+        return "Timed out (no response)"
+    except requests.exceptions.ConnectionError:
+        return "Connection failed (site unreachable/DNS error)"
+    except requests.exceptions.RequestException as e:
+        return f"Request failed ({e.__class__.__name__})"
+
+
+def send_email(subject, body):
+    gmail_user = os.environ["GMAIL_USER"]
+    gmail_password = os.environ["GMAIL_APP_PASSWORD"]
+    mail_to = [addr.strip() for addr in os.environ["MAIL_TO"].split(",")]
+
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = gmail_user
+    msg["To"] = ", ".join(mail_to)
+
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+        server.login(gmail_user, gmail_password)
+        server.sendmail(gmail_user, mail_to, msg.as_string())
+
+
+def main():
+    always_notify = os.environ.get("ALWAYS_NOTIFY", "false").lower() == "true"
+
+    urls = load_urls(URLS_FILE)
+    if not urls:
+        print("No URLs found in urls.txt")
+        return
+
+    problems = []
+    healthy = []
+
+    for url in urls:
+        issue = check_url(url)
+        if issue:
+            problems.append((url, issue))
+            print(f"[ISSUE] {url} -> {issue}")
+        else:
+            healthy.append(url)
+            print(f"[OK]    {url}")
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    if problems:
+        lines = [f"URL check run: {timestamp}", "", "Problems found:", ""]
+        for url, issue in problems:
+            lines.append(f"  - {url}\n    -> {issue}")
+        if healthy:
+            lines.append("")
+            lines.append(f"Healthy ({len(healthy)}): " + ", ".join(healthy))
+        body = "\n".join(lines)
+        subject = f"[URL Monitor] {len(problems)} site(s) need attention"
+        send_email(subject, body)
+        print("Notification email sent.")
+    elif always_notify:
+        body = f"URL check run: {timestamp}\n\nAll {len(healthy)} site(s) healthy:\n" + "\n".join(
+            f"  - {u}" for u in healthy
+        )
+        send_email("[URL Monitor] All sites healthy", body)
+        print("All-clear email sent.")
+    else:
+        print("All sites healthy. No email sent.")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

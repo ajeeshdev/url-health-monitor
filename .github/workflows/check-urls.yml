@@ -1,0 +1,32 @@
+name: Daily URL Health Check
+
+on:
+  schedule:
+    # Runs at 03:00 UTC every day. GitHub Actions cron is always UTC,
+    # so adjust this to land at "morning" in your own timezone.
+    # e.g. 03:00 UTC = 8:30 AM IST, 11:00 PM EST (prev day) / 8:00 PM PST
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}  # lets you trigger it manually from the Actions tab
+
+jobs:
+  check-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run URL checks
+        env:
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          ALWAYS_NOTIFY: "false"
+        run: python check_urls.py
