@@ -11,11 +11,13 @@ Config via environment variables (set as GitHub Actions secrets):
                           when everything is healthy (default: "false")
 """
 
+import html
 import os
 import re
 import smtplib
 import sys
 from datetime import datetime, timezone
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
 
@@ -155,15 +157,112 @@ def check_url(url):
         return f"Request failed ({e.__class__.__name__})"
 
 
-def send_email(subject, body):
+def build_html_report(timestamp, problems, healthy):
+    def esc(s):
+        return html.escape(str(s), quote=True)
+
+    if problems:
+        status_color = "#d93025"
+        status_label = f"{len(problems)} site(s) need attention"
+    else:
+        status_color = "#188038"
+        status_label = "All sites healthy"
+
+    problem_rows = ""
+    for url, issue in problems:
+        problem_rows += f"""
+        <tr>
+          <td style="padding:12px 16px;border-bottom:1px solid #f1f1f1;">
+            <div style="overflow-wrap:anywhere;">
+              <a href="{esc(url)}" style="color:#1a73e8;text-decoration:none;font-weight:600;">{esc(url)}</a>
+            </div>
+            <div style="color:#5f6368;font-size:13px;margin-top:4px;overflow-wrap:anywhere;">{esc(issue)}</div>
+          </td>
+        </tr>"""
+
+    problems_section = ""
+    if problems:
+        problems_section = f"""
+        <tr>
+          <td style="padding:24px 24px 8px 24px;">
+            <span style="display:inline-block;background:#fce8e6;color:#d93025;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:12px;">
+              Problems found ({len(problems)})
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:0 24px 8px 24px;">
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #f1f1f1;border-radius:8px;overflow:hidden;border-collapse:collapse;">
+              {problem_rows}
+            </table>
+          </td>
+        </tr>"""
+
+    healthy_section = ""
+    if healthy:
+        healthy_chips = "".join(
+            f'<span style="display:inline-block;background:#e6f4ea;color:#188038;font-size:12px;padding:4px 10px;border-radius:12px;margin:3px 4px 0 0;">{esc(u)}</span>'
+            for u in healthy
+        )
+        healthy_section = f"""
+        <tr>
+          <td style="padding:16px 24px 4px 24px;">
+            <span style="display:inline-block;background:#e6f4ea;color:#188038;font-size:12px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:4px 10px;border-radius:12px;">
+              Healthy ({len(healthy)})
+            </span>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:8px 24px 24px 24px;line-height:1.9;">
+            {healthy_chips}
+          </td>
+        </tr>"""
+
+    return f"""\
+<!DOCTYPE html>
+<html>
+  <body style="margin:0;padding:0;background:#f5f6f8;font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f5f6f8;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08);">
+            <tr>
+              <td style="background:{status_color};padding:20px 24px;">
+                <div style="color:#ffffff;font-size:18px;font-weight:700;">URL Health Monitor</div>
+                <div style="color:rgba(255,255,255,.85);font-size:13px;margin-top:4px;">{esc(status_label)}</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 24px 0 24px;color:#5f6368;font-size:13px;">
+                Run at {esc(timestamp)}
+              </td>
+            </tr>
+            {problems_section}
+            {healthy_section}
+            <tr>
+              <td style="padding:16px 24px 24px 24px;border-top:1px solid #f1f1f1;color:#9aa0a6;font-size:12px;">
+                Automated check &middot; edit urls.txt to change the monitored list.
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>"""
+
+
+def send_email(subject, text_body, html_body):
     gmail_user = os.environ["GMAIL_USER"]
     gmail_password = os.environ["GMAIL_APP_PASSWORD"]
     mail_to = [addr.strip() for addr in os.environ["MAIL_TO"].split(",")]
 
-    msg = MIMEText(body)
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = gmail_user
     msg["To"] = ", ".join(mail_to)
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
         server.login(gmail_user, gmail_password)
@@ -199,15 +298,17 @@ def main():
         if healthy:
             lines.append("")
             lines.append(f"Healthy ({len(healthy)}): " + ", ".join(healthy))
-        body = "\n".join(lines)
+        text_body = "\n".join(lines)
+        html_body = build_html_report(timestamp, problems, healthy)
         subject = f"[URL Monitor] {len(problems)} site(s) need attention"
-        send_email(subject, body)
+        send_email(subject, text_body, html_body)
         print("Notification email sent.")
     elif always_notify:
-        body = f"URL check run: {timestamp}\n\nAll {len(healthy)} site(s) healthy:\n" + "\n".join(
+        text_body = f"URL check run: {timestamp}\n\nAll {len(healthy)} site(s) healthy:\n" + "\n".join(
             f"  - {u}" for u in healthy
         )
-        send_email("[URL Monitor] All sites healthy", body)
+        html_body = build_html_report(timestamp, [], healthy)
+        send_email("[URL Monitor] All sites healthy", text_body, html_body)
         print("All-clear email sent.")
     else:
         print("All sites healthy. No email sent.")

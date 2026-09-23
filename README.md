@@ -1,6 +1,6 @@
 # URL Health Monitor
 
-Checks a list of websites every morning and emails you if any of them
+Checks a list of websites every 3 hours and emails you if any of them
 return a 404, a server error (5xx), fail to respond at all, come back
 blank/near-empty, show a broken-page error (e.g. a CMS fatal error or a
 "domain expired" placeholder), redirect somewhere unexpected, or contain
@@ -28,16 +28,16 @@ signs of a hack/spam injection.
 4. **Add your URLs** to `urls.txt`, one per line.
 
 5. **Set the schedule**: open `.github/workflows/check-urls.yml` and adjust
-   the `cron` line to your desired time. GitHub Actions cron is always UTC —
-   for example, for 8:00 AM IST use `cron: "30 2 * * *"` (2:30 UTC).
-   Use https://crontab.guru to build the expression.
+   the `cron` line to your desired frequency. It currently runs every 3 hours
+   (`cron: "7 */3 * * *"`). GitHub Actions cron is always UTC —
+   use https://crontab.guru to build a different expression.
 
-That's it — GitHub will now run the check automatically every day.
+That's it — GitHub will now run the check automatically every 3 hours.
 
 ## Testing it right now
 
-You don't have to wait for tomorrow morning:
-- Go to the **Actions** tab in your repo -> **Daily URL Health Check** -> **Run workflow**.
+You don't have to wait for the next scheduled run:
+- Go to the **Actions** tab in your repo -> **URL Health Check** -> **Run workflow**.
 - This runs it immediately using the `workflow_dispatch` trigger already in the workflow file.
 - Check the **Actions** log to see the per-URL results, and check your inbox
   if any site had a problem.
