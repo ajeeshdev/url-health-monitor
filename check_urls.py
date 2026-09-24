@@ -29,7 +29,7 @@ HEADERS = {
     # A browser-like UA cuts down on false "403 Forbidden" results from
     # bot-protection systems (Cloudflare etc.) that block generic/bot UAs.
     # It won't help with WAFs that block on IP range alone (GitHub Actions
-    # runners use known datacenter IPs) — see the 403 message below.
+    # runners use known datacenter IPs) — which is why 403 is ignored below.
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -98,7 +98,12 @@ def inspect_page_content(url, resp):
 
     text = resp.text[:500_000]
     visible_text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", text)).strip()
-    if len(visible_text) < MIN_VISIBLE_TEXT_CHARS:
+    # JavaScript apps (React/Vite etc.) ship a near-empty HTML shell and build
+    # their content in the browser, so only flag near-empty pages with no
+    # <script> tag at all.
+    if len(visible_text) < MIN_VISIBLE_TEXT_CHARS and not re.search(
+        r"<script\b", text, re.IGNORECASE
+    ):
         return f"Blank or near-empty page ({len(visible_text)} chars of visible text)"
 
     lower_text = text.lower()
@@ -141,11 +146,9 @@ def check_url(url):
         if resp.status_code >= 500:
             return f"Server error ({resp.status_code})"
         if resp.status_code == 403:
-            return (
-                "403 Forbidden (often a false alarm: bot/WAF protection "
-                "blocking the automated check itself, not a real outage — "
-                "verify in a browser before assuming the site is down)"
-            )
+            # Bot/WAF protection blocking the automated check itself, not a
+            # real outage (these sites load fine in a browser), so ignore it.
+            return None
         if resp.status_code >= 400:
             return f"Client error ({resp.status_code})"
         return inspect_page_content(url, resp)
